@@ -1,5 +1,7 @@
 ﻿using Hangfire.Dashboard.Management.Metadata;
 using Hangfire.Dashboard.Management.Support;
+using Microsoft.SqlServer.Management.Smo;
+using Microsoft.Win32.TaskScheduler;
 using System;
 using System.ComponentModel;
 using System.Linq;
@@ -14,6 +16,11 @@ namespace TaskDefinition {
     [ManagementPage("工作定義")]
     public static class Class1 {
         private static readonly string mailServerAddress = "電子郵件主機位址";
+        private static readonly string sqlServerName = "MSSQL 主機位址";
+        private static readonly string taskServerPath = "工作排程器主機路徑";
+        private static readonly string taskUserName = "工作排程器使用者名稱";
+        private static readonly string taskUserDomainName = "工作排程器使用者網域";
+        private static readonly string taskUserPassword = "工作排程器使用者密碼";
 
         [Job]
         [DisplayName("寄信功能")]
@@ -60,6 +67,51 @@ namespace TaskDefinition {
                 var smtpClient = new SmtpClient(mailServerAddress);
 
                 smtpClient.Send(mail);
+            }
+        }
+
+        [Job]
+        [DisplayName("執行SQL Server Agent 作業")]
+        [Description(nameof(StartSqlServerAgentJob))]
+        [PrintException]
+        public static void StartSqlServerAgentJob([DisplayData("作業名稱", "")] string jobName) {
+            var sqlServer = new Server(sqlServerName);
+            var job = sqlServer.JobServer.Jobs[jobName];
+            var doesJobExist = job != null;
+
+            if (!doesJobExist) {
+                throw new Exception($"SQL Server Agent 作業[{jobName}]不存在");
+            }
+
+            var isJobIdle = job.CurrentRunStatus == Microsoft.SqlServer.Management.Smo.Agent.JobExecutionStatus.Idle;
+
+            if (!isJobIdle) {
+                throw new Exception($"SQL Server Agent 作業[{jobName}]狀態必須是'閒置'才可被執行");
+            }
+
+            job.Start();
+        }
+
+        [Job]
+        [DisplayName("執行Windows 工作排程器 工作")]
+        [Description(nameof(StartTaskSchedulerTask))]
+        [PrintException]
+        public static void StartTaskSchedulerTask([DisplayData("工作路徑", "")] string taskPath) {
+            using (var ts = new TaskService(taskServerPath, taskUserName, taskUserDomainName, taskUserPassword)) {
+                var task = ts.GetTask(taskPath);
+                var doesTaskExist = task != null;
+
+                if (!doesTaskExist) {
+                    throw new Exception($"Windows 工作排程器 工作[{taskPath}]路徑不存在");
+                }
+
+                var isTaskReady = task.State == TaskState.Ready;
+
+                if (!isTaskReady) {
+                    throw new Exception($"Windows 工作排程器 工作[{taskPath}]狀態必須是'就緒'才可被執行");
+                }
+
+                task.Run();
             }
         }
     }
